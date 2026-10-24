@@ -1,0 +1,386 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Fantasy Wave Survival</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10151c;color:#fff;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
+#game{position:fixed;inset:0}
+canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;top:12px;left:12px;right:12px;pointer-events:none;text-shadow:0 2px 4px #000}
+.panel{background:#101722d9;border:1px solid #ffffff30;border-radius:12px;padding:10px 12px;backdrop-filter:blur(6px)}
+#top{display:flex;justify-content:space-between;align-items:start;gap:8px}
+#bars{width:min(55%,260px)}
+.bar{height:10px;border-radius:10px;background:#303743;overflow:hidden;margin:5px 0 9px}
+.fill{height:100%;width:100%;transition:width .15s}
+#hp{background:#e34e59}#stamina{background:#e9bd51}#xp{background:#56d5df}
+.small{font-size:12px;color:#c7d0db}
+#controls{position:fixed;inset:0;pointer-events:none}
+#stick{position:absolute;left:20px;bottom:28px;width:132px;height:132px;border:2px solid #ffffff45;border-radius:50%;background:#17202a99;pointer-events:auto;touch-action:none}
+#knob{position:absolute;left:36px;top:36px;width:56px;height:56px;border-radius:50%;background:#c4d0e4a6;border:2px solid #fff8;pointer-events:none}
+#buttons{position:absolute;right:14px;bottom:22px;display:grid;grid-template-columns:repeat(2,72px);gap:9px;pointer-events:auto}
+.action{height:64px;border:1px solid #ffffff55;border-radius:50%;background:#17202adc;color:white;font-weight:800;font-size:12px;box-shadow:0 3px 10px #0008;touch-action:none}
+.action:active,.action.active{background:#8c532b}
+#attack{background:#8f332f}#special{background:#5d3a9e}
+#message{position:fixed;top:32%;left:5%;right:5%;text-align:center;font-weight:800;font-size:26px;text-shadow:0 3px 8px #000;pointer-events:none}
+#overlay{display:none;position:fixed;inset:0;background:#050911d9;align-items:center;justify-content:center;padding:20px;z-index:5}
+#card{width:min(430px,100%);padding:22px;background:#182230;border:1px solid #64758a;border-radius:18px;text-align:center}
+#choices{display:grid;gap:10px;margin-top:16px}
+.choice,#restart{padding:14px;border:1px solid #71839b;border-radius:12px;background:#25354a;color:white;font-size:15px;font-weight:700}
+.choice small{display:block;margin-top:5px;font-weight:400;color:#c5d2df}
+#hint{position:fixed;bottom:170px;left:12px;color:#fff9;font-size:11px;pointer-events:none}
+@media(min-width:750px){#stick{left:32px;bottom:32px}#buttons{right:30px;bottom:30px;grid-template-columns:repeat(2,82px)}.action{height:72px}#hint{bottom:180px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+ <div id="top">
+  <div class="panel">
+   <b>⚔️ THE ASHEN ARENA</b>
+   <div class="small" id="wave">WAVE 1</div>
+   <div class="small" id="kills">Enemies defeated: 0</div>
+  </div>
+  <div class="panel" id="bars">
+   <div class="small">HEALTH <span id="hpText">100/100</span></div>
+   <div class="bar"><div class="fill" id="hp"></div></div>
+   <div class="small">STAMINA <span id="stText">100/100</span></div>
+   <div class="bar"><div class="fill" id="stamina"></div></div>
+   <div class="small">EXPERIENCE <span id="xpText">0/5</span></div>
+   <div class="bar"><div class="fill" id="xp"></div></div>
+  </div>
+ </div>
+</div>
+<div id="message">SURVIVE THE WAVES</div>
+<div id="hint">LEFT: MOVE · RIGHT: FIGHT</div>
+<div id="controls">
+ <div id="stick"><div id="knob"></div></div>
+ <div id="buttons">
+  <button class="action" id="block">🛡️<br>BLOCK</button>
+  <button class="action" id="dodge">➤<br>DODGE</button>
+  <button class="action" id="attack">⚔️<br>ATTACK</button>
+  <button class="action" id="special">✦<br>SPECIAL</button>
+ </div>
+</div>
+<div id="overlay"><div id="card">
+ <h2 id="overlayTitle">CHOOSE AN UPGRADE</h2>
+ <p id="overlayText">Become stronger before the next wave.</p>
+ <div id="choices"></div>
+ <button id="restart" style="display:none;width:100%;margin-top:12px">TRY AGAIN</button>
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);
+if(!window.THREE){$('message').textContent='3D library failed to load. Check your internet connection.';return}
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x111923);
+scene.fog=new THREE.Fog(0x111923,19,43);
+const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,100);
+const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=false;
+renderer.outputEncoding=THREE.sRGBEncoding;
+$('game').appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xb8d7ff,0x453323,2));
+const light=new THREE.DirectionalLight(0xffd5a0,2.1);
+light.position.set(-5,12,7);scene.add(light);
+const mat=(color,roughness=.8,metalness=0)=>new THREE.MeshStandardMaterial({color,roughness,metalness});
+const groundMat=mat(0x303b38),stoneMat=mat(0x535b61),darkMat=mat(0x20252e),goldMat=mat(0xf2b84b,.35,.45);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(48,48),groundMat);
+floor.rotation.x=-Math.PI/2;floor.position.y=-.08;scene.add(floor);
+const grid=new THREE.GridHelper(48,24,0x53635d,0x46534e);grid.position.y=-.055;scene.add(grid);
+const arena=new THREE.Group();scene.add(arena);
+for(let i=0;i<24;i++){
+ const a=i/24*Math.PI*2;
+ const r=12.8;
+ const h=1.3+(i%4)*.25;
+ const rock=new THREE.Mesh(new THREE.CylinderGeometry(.45,.7,h,5),stoneMat);
+ rock.position.set(Math.cos(a)*r,h/2,Math.sin(a)*r);
+ rock.rotation.y=i*1.8;arena.add(rock);
+}
+for(let i=0;i<6;i++){
+ const pillar=new THREE.Mesh(new THREE.CylinderGeometry(.23,.33,2.6,6),darkMat);
+ const a=i/6*Math.PI*2;
+ pillar.position.set(Math.cos(a)*8.4,1.3,Math.sin(a)*8.4);scene.add(pillar);
+ const flame=new THREE.Mesh(new THREE.SphereGeometry(.18,8,6),new THREE.MeshBasicMaterial({color:0xff9a3b}));
+ flame.position.set(pillar.position.x,2.75,pillar.position.z);scene.add(flame);
+}
+function makeHero(){
+ const g=new THREE.Group();
+ const body=new THREE.Mesh(new THREE.CapsuleGeometry(.43,.65,4,8),mat(0x315c91));
+ body.position.y=1.05;g.add(body);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.3,10,8),mat(0xe0b58e));
+ head.position.y=1.85;g.add(head);
+ const helmet=new THREE.Mesh(new THREE.SphereGeometry(.32,10,6,0,Math.PI*2,0,Math.PI*.52),mat(0x687987,.4,.5));
+ helmet.position.y=2;g.add(helmet);
+ const cape=new THREE.Mesh(new THREE.BoxGeometry(.65,.9,.12),mat(0x722f39));
+ cape.position.set(0,1.05,.35);g.add(cape);
+ const sword=new THREE.Group();
+ const blade=new THREE.Mesh(new THREE.BoxGeometry(.13,.9,.055),mat(0xdce9ed,.25,.7));
+ blade.position.y=.5;sword.add(blade);
+ const guard=new THREE.Mesh(new THREE.BoxGeometry(.36,.09,.12),goldMat);
+ guard.position.y=.08;sword.add(guard);
+ const grip=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,.3,6),darkMat);
+ grip.position.y=-.1;sword.add(grip);
+ sword.position.set(.52,1.15,-.05);g.add(sword);
+ g.userData={sword,body,head};scene.add(g);return g;
+}
+const hero=makeHero();
+hero.position.set(0,0,0);
+const state={hp:100,maxHp:100,st:100,maxSt:100,xp:0,need:5,wave:1,kills:0,damage:22,speed:5,range:2.4,attackRate:.48,specialCd:0,attackCd:0,dodge:0,invuln:0,blocking:false,dead:false,level:1};
+let enemies=[],spawnLeft=0,spawnTimer=0,between=1.8,paused=false,gameOver=false,elapsed=0;
+const clock=new THREE.Clock();
+const move={x:0,y:0},keys={};
+let stickActive=false,stickId=null,stickOrigin={x:0,y:0},swing=0,hitSet=new Set(),messageTimer=2;
+function showMessage(t,d=1.3){$('message').textContent=t;messageTimer=d}
+function updateHud(){
+ $('hpText').textContent=Math.ceil(state.hp)+'/'+state.maxHp;
+ $('stText').textContent=Math.ceil(state.st)+'/'+state.maxSt;
+ $('xpText').textContent=state.xp+'/'+state.need;
+ $('hp').style.width=Math.max(0,state.hp/state.maxHp*100)+'%';
+ $('stamina').style.width=Math.max(0,state.st/state.maxSt*100)+'%';
+ $('xp').style.width=Math.min(100,state.xp/state.need*100)+'%';
+ $('wave').textContent='WAVE '+state.wave+' · LEVEL '+state.level;
+ $('kills').textContent='Enemies defeated: '+state.kills;
+}
+function makeEnemy(boss=false){
+ const g=new THREE.Group();
+ const color=boss?0x8f3d9f:([0x779d52,0x9d6452,0x677c9c][Math.floor(Math.random()*3)]);
+ const body=new THREE.Mesh(new THREE.CapsuleGeometry(boss?.68:.38,boss?.95:.42,4,7),mat(color));
+ body.position.y=boss?1.3:.78;g.add(body);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(boss?.46:.27,8,7),mat(boss?0x552451:0xb2a17d));
+ head.position.y=boss?2.25:1.38;g.add(head);
+ const eyeMat=new THREE.MeshBasicMaterial({color:0xff483e});
+ for(const s of [-1,1]){
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(.055,6,5),eyeMat);
+  eye.position.set(s*(boss?.19:.105),boss?2.3:1.4,-(boss?.39:.23));g.add(eye);
+ }
+ const weapon=new THREE.Mesh(new THREE.BoxGeometry(.13,boss?.95:.55,.13),mat(boss?0x512b65:0x42434c));
+ weapon.position.set(.48,boss?1.25:.8,-.05);g.add(weapon);
+ const max=boss?300:48+state.wave*8;
+ const bar=new THREE.Mesh(new THREE.BoxGeometry(boss?1.5:.8,.075,.06),new THREE.MeshBasicMaterial({color:0x4a2025}));
+ bar.position.y=boss?3:.2;bar.position.z=-.38;g.add(bar);
+ g.position.set((Math.random()-.5)*19,0,-(Math.random()*4+10));
+ g.userData={hp:max,max,boss,speed:(boss?1.35:1.65+Math.min(state.wave*.06,1.5)),damage:boss?18:7+state.wave*.6,attack:0,body,bar,stun:0,phase:Math.random()*5};
+ scene.add(g);enemies.push(g);
+}
+function startWave(){
+ spawnLeft=state.wave%5===0?5+state.wave:5+state.wave*2;
+ if(state.wave%5===0){makeEnemy(true);spawnLeft=Math.max(2,spawnLeft-1);showMessage('BOSS WAVE '+state.wave,2)}
+ else showMessage('WAVE '+state.wave,1.5);
+ spawnTimer=.7;between=0;
+}
+function gainXp(n=1){
+ state.xp+=n;
+ if(state.xp>=state.need){
+  state.xp-=state.need;state.level++;state.need=Math.ceil(state.need*1.35);
+  openUpgrade();
+ }
+ updateHud();
+}
+const upgrades=[
+ {name:'Tempered Steel',desc:'Sword attacks deal 30% more damage.',apply:()=>state.damage*=1.3},
+ {name:'Fleet Foot',desc:'Move 15% faster and dodge farther.',apply:()=>state.speed*=1.15},
+ {name:'Vitality',desc:'Gain 25 maximum health and heal 25.',apply:()=>{state.maxHp+=25;state.hp=Math.min(state.maxHp,state.hp+25)}},
+ {name:'Deep Reserves',desc:'Increase stamina by 25 and refill it.',apply:()=>{state.maxSt+=25;state.st=state.maxSt}},
+ {name:'Swordmaster',desc:'Attack 18% faster.',apply:()=>state.attackRate*=.82},
+ {name:'Arcane Burst',desc:'Special attack deals 40% more damage.',apply:()=>state.specialDamage=(state.specialDamage||70)*1.4},
+ {name:'Long Reach',desc:'Increase sword range by 20%.',apply:()=>state.range*=1.2},
+ {name:'Second Wind',desc:'Restore 40 health immediately.',apply:()=>state.hp=Math.min(state.maxHp,state.hp+40)}
+];
+function openUpgrade(){
+ paused=true;$('overlay').style.display='flex';$('overlayTitle').textContent='LEVEL UP';
+ $('overlayText').textContent='Choose one upgrade. Your build lasts for this run.';
+ $('choices').innerHTML='';
+ const options=[...upgrades].sort(()=>Math.random()-.5).slice(0,3);
+ options.forEach(u=>{
+  const b=document.createElement('button');b.className='choice';
+  b.innerHTML=u.name+'<small>'+u.desc+'</small>';
+  b.onclick=()=>{u.apply();$('overlay').style.display='none';paused=false;updateHud();showMessage(u.name+'!',1.5)};
+  $('choices').appendChild(b);
+ });
+}
+function endGame(){
+ if(gameOver)return;gameOver=true;paused=true;
+ $('overlay').style.display='flex';$('overlayTitle').textContent='YOU HAVE FALLEN';
+ $('overlayText').textContent='Wave '+state.wave+' · Level '+state.level+' · Enemies defeated '+state.kills;
+ $('choices').innerHTML='';$('restart').style.display='block';
+}
+$('restart').onclick=()=>{
+ enemies.forEach(e=>scene.remove(e));enemies=[];
+ Object.assign(state,{hp:100,maxHp:100,st:100,maxSt:100,xp:0,need:5,wave:1,kills:0,damage:22,speed:5,range:2.4,attackRate:.48,specialCd:0,attackCd:0,dodge:0,invuln:0,blocking:false,dead:false,level:1});
+ state.specialDamage=70;hero.position.set(0,0,0);hero.rotation.set(0,0,0);
+ spawnLeft=0;spawnTimer=0;between=1.5;gameOver=false;paused=false;
+ $('overlay').style.display='none';$('restart').style.display='none';showMessage('SURVIVE THE WAVES',2);updateHud();
+};
+function setButton(id,down,fn){
+ const el=$(id);
+ const start=e=>{e.preventDefault();el.classList.add('active');fn(true)};
+ const end=e=>{e.preventDefault();el.classList.remove('active');fn(false)};
+ el.addEventListener('pointerdown',start);
+ el.addEventListener('pointerup',end);
+ el.addEventListener('pointercancel',end);
+ el.addEventListener('pointerleave',e=>{if(e.buttons)end(e)});
+}
+setButton('attack',down=>{},()=>{});
+$('attack').addEventListener('pointerdown',e=>{e.preventDefault();doAttack(false)});
+$('special').addEventListener('pointerdown',e=>{e.preventDefault();doAttack(true)});
+setButton('block',true,v=>{state.blocking=v});
+setButton('dodge',true,v=>{if(v)dodge()});
+function doAttack(special){
+ if(paused||gameOver)return;
+ if(special){
+  if(state.specialCd>0||state.st<25)return;
+  state.st-=25;state.specialCd=5;state.specialDamage=state.specialDamage||70;
+  swing=1.1;hero.userData.sword.rotation.x=-1.1;
+  showMessage('ARCANE SLASH!',.65);
+  const radius=4.4;
+  enemies.forEach(e=>{if(e.position.distanceTo(hero.position)<radius){damageEnemy(e,state.specialDamage,true)}});
+  updateHud();return;
+ }
+ if(state.attackCd>0||state.st<0)return;
+ state.attackCd=state.attackRate;swing=.32;hitSet=new Set();
+ hero.userData.sword.rotation.x=-1.8;
+ let found=0;
+ enemies.forEach(e=>{
+  const dx=e.position.x-hero.position.x,dz=e.position.z-hero.position.z;
+  const dist=Math.hypot(dx,dz);
+  const facing=new THREE.Vector3(Math.sin(hero.rotation.y),0,Math.cos(hero.rotation.y));
+  const dir=new THREE.Vector3(dx,0,dz).normalize();
+  if(dist<state.range+(e.userData.boss?.5:0)&&facing.dot(dir)>.05){
+   damageEnemy(e,state.damage,false);found++;
+  }
+ });
+ if(found===0)showMessage('MISS',.25);
+}
+function damageEnemy(e,damage,heavy){
+ if(!e||!e.parent)return;
+ const d=e.userData;d.hp-=damage;d.stun=heavy?.25:.1;
+ d.body.material.emissive=new THREE.Color(0x552222);
+ d.body.scale.set(1.1,1.04,1.1);
+ const ratio=Math.max(0,d.hp/d.max);
+ d.bar.scale.x=ratio;
+ d.bar.position.x=-(1-ratio)*(d.boss?1.5:.8)/2;
+ if(d.hp<=0){
+  scene.remove(e);enemies=enemies.filter(x=>x!==e);state.kills++;
+  gainXp(d.boss?5:1);if(d.boss)showMessage('BOSS DEFEATED!',1.5);
+  updateHud();
+ }
+}
+function dodge(){
+ if(paused||gameOver||state.st<25||state.dodge>0)return;
+ state.st-=25;state.dodge=.27;state.invuln=.36;
+ let x=move.x,z=move.y;
+ if(Math.hypot(x,z)<.1){x=Math.sin(hero.rotation.y);z=Math.cos(hero.rotation.y)}
+ const l=Math.hypot(x,z)||1;
+ hero.userData.dodgeDir={x:x/l,z:z/l};
+}
+const stick=$('stick'),knob=$('knob');
+stick.addEventListener('pointerdown',e=>{
+ e.preventDefault();stickActive=true;stickId=e.pointerId;stick.setPointerCapture(e.pointerId);
+ const r=stick.getBoundingClientRect();stickOrigin={x:r.left+r.width/2,y:r.top+r.height/2};updateStick(e);
+});
+stick.addEventListener('pointermove',e=>{if(stickActive&&e.pointerId===stickId)updateStick(e)});
+function updateStick(e){
+ const dx=e.clientX-stickOrigin.x,dy=e.clientY-stickOrigin.y,l=Math.hypot(dx,dy),m=43;
+ const scale=l>m?m/l:1;
+ knob.style.transform='translate('+dx*scale+'px,'+dy*scale+'px)';
+ move.x=dx*scale/m;move.y=dy*scale/m;
+}
+function releaseStick(){stickActive=false;stickId=null;move.x=0;move.y=0;knob.style.transform='translate(0,0)'}
+stick.addEventListener('pointerup',releaseStick);stick.addEventListener('pointercancel',releaseStick);
+addEventListener('keydown',e=>{
+ keys[e.key.toLowerCase()]=true;
+ if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(e.key.toLowerCase()))e.preventDefault();
+ if(e.repeat)return;
+ if(e.key===' '||e.key.toLowerCase()==='shift')dodge();
+ if(e.key.toLowerCase()==='j')doAttack(false);
+ if(e.key.toLowerCase()==='k')doAttack(true);
+ if(e.key.toLowerCase()==='q')state.blocking=true;
+});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;if(e.key.toLowerCase()==='q')state.blocking=false});
+function update(dt){
+ if(paused||gameOver)return;
+ elapsed+=dt;
+ state.attackCd=Math.max(0,state.attackCd-dt);
+ state.specialCd=Math.max(0,state.specialCd-dt);
+ state.invuln=Math.max(0,state.invuln-dt);
+ state.dodge=Math.max(0,state.dodge-dt);
+ state.st=Math.min(state.maxSt,state.st+(state.blocking?8:23)*dt);
+ if(swing>0){swing-=dt;hero.userData.sword.rotation.x=-1.8*Math.max(0,swing/.32)}
+ let mx=move.x,mz=move.y;
+ if(keys.a||keys.arrowleft)mx-=1;if(keys.d||keys.arrowright)mx+=1;
+ if(keys.w||keys.arrowup)mz-=1;if(keys.s||keys.arrowdown)mz+=1;
+ let len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}
+ const camForward=new THREE.Vector3();camera.getWorldDirection(camForward);camForward.y=0;camForward.normalize();
+ const camRight=new THREE.Vector3(camForward.z,0,-camForward.x);
+ const direction=new THREE.Vector3().addScaledVector(camRight,mx).addScaledVector(camForward,-mz);
+ if(state.dodge>0&&hero.userData.dodgeDir){
+  direction.set(hero.userData.dodgeDir.x,0,hero.userData.dodgeDir.z);
+  hero.position.addScaledVector(direction,13*dt);
+ }else if(direction.lengthSq()>.001){
+  direction.normalize();hero.position.addScaledVector(direction,state.speed*dt);
+  hero.rotation.y=Math.atan2(direction.x,direction.z);
+ }
+ const radius=Math.hypot(hero.position.x,hero.position.z);
+ if(radius>10.8){hero.position.x*=10.8/radius;hero.position.z*=10.8/radius}
+ hero.userData.body.material.color.setHex(state.invuln>0?0x91d9ff:0x315c91);
+ const desired=new THREE.Vector3(hero.position.x+Math.sin(hero.rotation.y)*.3,1.5,hero.position.z+Math.cos(hero.rotation.y)*.3);
+ const camTarget=new THREE.Vector3(hero.position.x-Math.sin(hero.rotation.y)*6,4.1,hero.position.z-Math.cos(hero.rotation.y)*6);
+ camera.position.lerp(camTarget,1-Math.pow(.001,dt));camera.lookAt(desired);
+ if(spawnLeft>0){
+  spawnTimer-=dt;
+  if(spawnTimer<=0){makeEnemy(false);spawnLeft--;spawnTimer=Math.max(.28,.9-state.wave*.025)}
+ }else if(enemies.length===0){
+  between-=dt;
+  if(between<=0){state.wave++;startWave();updateHud()}
+ }
+ for(const e of [...enemies]){
+  const d=e.userData;d.phase+=dt;
+  if(d.stun>0){d.stun-=dt;d.body.scale.lerp(new THREE.Vector3(1,1,1),dt*5);continue}
+  const dx=hero.position.x-e.position.x,dz=hero.position.z-e.position.z,dist=Math.hypot(dx,dz)||1;
+  e.rotation.y=Math.atan2(dx,dz);
+  if(dist>(d.boss?1.9:1.25)){
+   e.position.x+=dx/dist*d.speed*dt;e.position.z+=dz/dist*d.speed*dt;
+  }else{
+   d.attack-=dt;
+   if(d.attack<=0){
+    d.attack=d.boss?1.5:1.2;
+    if(state.invuln<=0&&state.dodge<=0){
+     const blockFront=Math.cos(hero.rotation.y-e.rotation.y)>.2;
+     const blocked=state.blocking&&blockFront;
+     state.hp-=blocked?d.damage*.2:d.damage;
+     if(blocked)state.st=Math.max(0,state.st-12);
+     showMessage(blocked?'BLOCKED!':'HIT!',.25);
+     if(state.hp<=0){state.hp=0;updateHud();endGame();break}
+     updateHud();
+    }
+   }
+  }
+  e.position.y=Math.abs(Math.sin(elapsed*3+d.phase))*.04;
+ }
+ if(messageTimer>0){messageTimer-=dt;if(messageTimer<=0)$('message').textContent=''}
+ updateHud();
+}
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.035);
+ if(!gameOver)update(dt);
+ renderer.render(scene,camera);
+}
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+ renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);
+});
+state.specialDamage=70;
+startWave();updateHud();animate();
+})();
+</script>
+</body>
+</html>
